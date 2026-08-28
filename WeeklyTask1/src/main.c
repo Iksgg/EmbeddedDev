@@ -1,3 +1,8 @@
+/*Perjantai 28/8/26: Toteutettu ledien välkkyminen järjestyksessä (punainen, keltainen, vihreä)
+ledit ovat päällä 1 sekunnin jonka jälkeen väri vaihtuu */
+
+
+
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/device.h>
@@ -11,14 +16,11 @@ static const struct gpio_dt_spec blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
 // Red led thread initialization
 #define STACKSIZE 500
 #define PRIORITY 5
-void red_led_task(void *, void *, void*);
-void green_led_task(void *, void *, void*);
-void blue_led_task(void *, void *, void*);
+void led_task(void *, void *, void*);
 int init_led();
+int led_state = 0;
 
-K_THREAD_DEFINE(red_thread,STACKSIZE,red_led_task,NULL,NULL,NULL,PRIORITY,0,0);
-K_THREAD_DEFINE(green_thread,STACKSIZE,green_led_task,NULL,NULL,NULL,PRIORITY,0,0);
-K_THREAD_DEFINE(blue_thread,STACKSIZE,blue_led_task,NULL,NULL,NULL,PRIORITY,0,0);
+K_THREAD_DEFINE(led_thread,STACKSIZE,led_task,NULL,NULL,NULL,PRIORITY,0,0);
 K_THREAD_DEFINE(init_thread,STACKSIZE,init_led,NULL,NULL,NULL,PRIORITY,0,0);
 
 // Main program
@@ -59,56 +61,58 @@ int  init_led() {
 	return 0;
 }
 
-// Task to handle red led
-void red_led_task(void *, void *, void*) {
-	
-	printk("Red led thread started\n");
+// Task to handle led blinking and sequenceing
+void led_task(void *, void *, void*) {
+
+	//LED Changing in sequence (red, yellow, green)
+	printk("led thread started\n");
+	while (true) {
+		switch (led_state) {
+			case 0:
+				led_state = 1;	
+				gpio_pin_set_dt(&red,1);
+				gpio_pin_set_dt(&green,0);
+				gpio_pin_set_dt(&blue,0);
+				printk("led red\n");
+				k_sleep(K_SECONDS(1));
+				break;
+			case 1:
+				led_state = 2;
+				gpio_pin_set_dt(&red,1);
+				gpio_pin_set_dt(&green,1);
+				gpio_pin_set_dt(&blue,0);
+				printk("led yellow\n");
+				k_sleep(K_SECONDS(1));
+				break;
+			case 2:
+				led_state = 0;
+				gpio_pin_set_dt(&red,0);
+				gpio_pin_set_dt(&green,1);
+				gpio_pin_set_dt(&blue,0);
+				printk("led green\n");
+				k_sleep(K_SECONDS(1));
+				break;
+		}
+	}
+
+
+	/* LED blinking white
+	printk("led thread started\n");
 	while (true) {
 		// 1. set led on 
 		gpio_pin_set_dt(&red,1);
-		printk("Red on\n");
+		gpio_pin_set_dt(&green,1);
+		gpio_pin_set_dt(&blue,1);
+		printk("led on\n");
 		// 2. sleep for 2 seconds
 		k_sleep(K_SECONDS(1));
 		// 3. set led off
 		gpio_pin_set_dt(&red,0);
-		printk("Red off\n");
-		// 4. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
-	}
-}
-
-// Task to handle green led
-void green_led_task(void *, void *, void*) {
-	
-	printk("Green led thread started\n");
-	while (true) {
-		// 1. set led on 
-		gpio_pin_set_dt(&green,1);
-		printk("Green on\n");
-		// 2. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
-		// 3. set led off
 		gpio_pin_set_dt(&green,0);
-		printk("Green off\n");
-		// 4. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
-	}
-}
-
-// Task to handle blue led
-void blue_led_task(void *, void *, void*) {
-	
-	printk("Blue led thread started\n");
-	while (true) {
-		// 1. set led on 
-		gpio_pin_set_dt(&blue,1);
-		printk("Blue on\n");
-		// 2. sleep for 2 seconds
-		k_sleep(K_SECONDS(1));
-		// 3. set led off
 		gpio_pin_set_dt(&blue,0);
-		printk("Blue off\n");
+		printk("led off\n");
 		// 4. sleep for 2 seconds
 		k_sleep(K_SECONDS(1));
-	}
+	
+	}*/
 }
