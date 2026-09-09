@@ -11,10 +11,12 @@ ledit ovat päällä 1 sekunnin jonka jälkeen väri vaihtuu */
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 
-// Led pin configurations
-static const struct gpio_dt_spec red = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
-static const struct gpio_dt_spec green = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
-static const struct gpio_dt_spec blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
+// Pin configurations
+static const struct gpio_dt_spec red    = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+static const struct gpio_dt_spec green  = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
+static const struct gpio_dt_spec blue   = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
+static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios);
+static struct gpio_callback button_cb_data;
 
 // Thread parameters
 #define STACKSIZE 500
@@ -26,14 +28,13 @@ volatile int prev_state = 0;
 
 // Function prototypes
 void red_task(void *, void *, void *);
-void yellow_task(void *m void *, void *);
-void green_task(void *m void *, void *);
+void yellow_task(void *, void *, void *);
+void green_task(void *, void *, void *);
 int init(void);
 
-K_THREAD_DEFINE(red_thread,STACKSIZE,led_task,NULL,NULL,NULL,PRIORITY,0,0);
-K_THREAD_DEFINE(yellow_thread,STACKSIZE,led_task,NULL,NULL,NULL,PRIORITY,0,0);
-K_THREAD_DEFINE(green_thread,STACKSIZE,led_task,NULL,NULL,NULL,PRIORITY,0,0);
-K_THREAD_DEFINE(init_thread,STACKSIZE,init_led,NULL,NULL,NULL,PRIORITY,0,0);
+K_THREAD_DEFINE(red_thread,STACKSIZE,red_task,NULL,NULL,NULL,PRIORITY,0,0);
+K_THREAD_DEFINE(yellow_thread,STACKSIZE,yellow_task,NULL,NULL,NULL,PRIORITY,0,0);
+K_THREAD_DEFINE(green_thread,STACKSIZE,green_task,NULL,NULL,NULL,PRIORITY,0,0);
 
 // Main program
 int main(void)
@@ -46,8 +47,8 @@ int main(void)
 void button_0_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins){
 	printk("Button pressed\n");
 	if (led_state != 4){
-		prev_state = led_state
-		led_state = 4
+		prev_state = led_state;
+		led_state = 4;
 	} 
 	else {
 		led_state = prev_state;
@@ -56,6 +57,20 @@ void button_0_handler(const struct device *dev, struct gpio_callback *cb, uint32
 
 // Initialize leds
 int  init(void) {
+    // Button pin initialization
+    if (!gpio_is_ready_dt(&button)) {
+        printk("Error: button device not ready\n");
+        return -1;
+    }
+
+    int ret_btn = gpio_pin_configure_dt(&button, GPIO_INPUT | button.dt_flags);
+    if (ret_btn < 0) return ret_btn;
+
+    ret_btn = gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_FALLING);
+    if (ret_btn < 0) return ret_btn;
+
+    gpio_init_callback(&button_cb_data, button_0_handler, BIT(button.pin));
+    gpio_add_callback(button.port, &button_cb_data);
 
 	// Led pin initialization
 	int ret = gpio_pin_configure_dt(&red, GPIO_OUTPUT_ACTIVE);
@@ -99,7 +114,7 @@ void red_task(void *, void *, void*) {
                 led_state = 1;    // Siirrytään suraavaan tilaan
             }
         } else {
-            k_msleep(100); Odottaa jos Pause
+            k_msleep(100); //Odottaa jos Pause
         }
     }
 }
