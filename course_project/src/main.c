@@ -57,8 +57,8 @@ void uart_task(void *, void *, void *);
 K_THREAD_DEFINE(red_thread,STACKSIZE,red_task,NULL,NULL,NULL,PRIORITY,0,0);
 K_THREAD_DEFINE(yellow_thread,STACKSIZE,yellow_task,NULL,NULL,NULL,PRIORITY,0,0);
 K_THREAD_DEFINE(green_thread,STACKSIZE,green_task,NULL,NULL,NULL,PRIORITY,0,0);
-K_THREAD_DEFINE(dispatcher_task,DISPATCHER_STACKSIZE,dispatcher_task,NULL,NULL,NULL,PRIORITY,0,0);
-K_THREAD_DEFINE(uart_task,STACKSIZE,uart_task,NULL,NULL,NULL,PRIORITY,0,0);
+K_THREAD_DEFINE(dispatcher_thread,DISPATCHER_STACKSIZE,dispatcher_task,NULL,NULL,NULL,PRIORITY,0,0);
+K_THREAD_DEFINE(uart_thread,STACKSIZE,uart_task,NULL,NULL,NULL,PRIORITY,0,0);
 
 // Main program
 int main(void)
