@@ -83,6 +83,20 @@ void button_0_handler(const struct device *dev, struct gpio_callback *cb, uint32
 
 // Initialize leds
 int  init(void) {
+    // Button pin initialization
+    if (!gpio_is_ready_dt(&button)) {
+        printk("Error: button device not ready\n");
+        return -1;
+    }
+
+    int ret_btn = gpio_pin_configure_dt(&button, GPIO_INPUT | button.dt_flags);
+    if (ret_btn < 0) return ret_btn;
+
+    ret_btn = gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_FALLING);
+    if (ret_btn < 0) return ret_btn;
+
+    gpio_init_callback(&button_cb_data, button_0_handler, BIT(button.pin));
+    gpio_add_callback(button.port, &button_cb_data);
 
 	// Led pin initialization
 	int ret = gpio_pin_configure_dt(&red, GPIO_OUTPUT_ACTIVE);
