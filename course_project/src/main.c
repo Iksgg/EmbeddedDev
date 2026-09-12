@@ -18,6 +18,7 @@ ledit ovat päällä 1 sekunnin jonka jälkeen väri vaihtuu */
 struct uart_msg{
     void *fifo_reserved;
     char color;
+    uint32_t duration_ms;
 };
 
 static struct k_fifo seq_fifo;
@@ -31,6 +32,7 @@ static struct k_condvar release_cv;
 
 // State and sync for dispatcher
 static volatile char current_trgt = 0;
+static volatile uint32_t current_duration = 1000;
 static volatile bool task_release = true;
 
 // Led pin configurations
@@ -125,7 +127,7 @@ void red_task(void *, void *, void*) {
         gpio_pin_set_dt(&blue, 0);
         printk("led red\n");
 
-        k_sleep(K_SECONDS(1));
+        k_msleep(current_duration);
 
         // Send releas to dispatcher
         k_mutex_lock(&color_mutex, K_FOREVER);
@@ -151,7 +153,7 @@ void yellow_task(void *, void *, void*) {
         gpio_pin_set_dt(&blue, 0);
         printk("led yellow\n");
 
-        k_sleep(K_SECONDS(1));
+        k_msleep(current_duration);
 
         // Send releas to dispatcher
         k_mutex_lock(&color_mutex, K_FOREVER);
@@ -177,7 +179,7 @@ void green_task(void *, void *, void*) {
         gpio_pin_set_dt(&blue, 0);
         printk("led green\n");
 
-        k_sleep(K_SECONDS(1));
+        k_msleep(current_duration);
 
         // Send releas to dispatcher
         k_mutex_lock(&color_mutex, K_FOREVER);
@@ -204,6 +206,7 @@ void dispatcher_task(void *, void *, void *) {
 
         k_mutex_lock(&color_mutex, K_FOREVER);
         current_trgt = msg -> color;
+        current_duration = msg -> duration_ms;
         task_release = false;
 
         // Releas memory
@@ -230,17 +233,64 @@ void dispatcher_task(void *, void *, void *) {
 }
 
 void uart_task(void *, void *, void *) {
+    char rx_buff[32];
+    int buff_idx = 0;
     char c;
+    char color = 0;
+    uint32_t duration = 0;
+    bool has_duration = false;
+
     while (true) {
-        // Read char from serial
+        // Read sequense from serial
         if (uart_poll_in(uart_dev, &c) == 0) {
-            if (c == 'R' || c == 'r' || c == 'Y' || c == 'y' || c == 'G' || c == 'g') {
-                struct uart_msg *msg = k_malloc(sizeof(struct uart_msg));
-                if (msg) {
-                    msg -> color = c;
-                    k_fifo_put(&seq_fifo, msg);
+            printk("RX: 0x%02X ('%c')\n", c, (c >= 32 && c <= 126) ? c : '.'); // Debugg print
+            if (c == '\n' || c == '\r'){
+                if (buff_idx > 0){
+                    rx_buff[buff_idx] = '\0';
+                    printk("Ajetaan sekvenssi: %s\n", rx_buff); // Debugg print
+
+                    // Run trough the sequense
+                    for (int i = 0; i < buff_idx; i++){
+                        char seq_char = rx_buff[i];
+                        if (seq_char == 'R' || seq_char == 'r' || seq_char == 'Y' || seq_char == 'y' || seq_char == 'G' || seq_char == 'g') {
+                            if (color != 0) {
+                                if (!has_duration) duration = 1000;
+                                struct uart_msg *msg = k_malloc(sizeof(struct uart_msg));
+                                if (msg) {
+                                    msg -> color = color;
+                                    msg -> duration_ms = duration;
+                                    k_fifo_put(&seq_fifo, msg);
+                                }                            
+                            
+                            }
+                            color = seq_char;
+                            duration = 0;
+                            has_duration = false;
+
+                        } else if (seq_char >= '0' && seq_char <= '9') {
+                            duration = (duration * 10) + (seq_char - '0');
+                            has_duration = true;
+                        }
+
+                    }
+                    if (color != 0) {
+                        if (!has_duration) duration = 1000; // Fallback
+                        
+                        struct uart_msg *msg = k_malloc(sizeof(struct uart_msg));
+                        if (msg) {
+                            msg->color = color;
+                            msg->duration_ms = duration;
+                            k_fifo_put(&seq_fifo, msg);
+                        }
+                    }
+                    buff_idx = 0;
+                }
+            } else {
+                if(buff_idx < sizeof(rx_buff) - 1){
+                    rx_buff[buff_idx++] = c;
                 }
             }
+
         }
         k_msleep(10);
     }
