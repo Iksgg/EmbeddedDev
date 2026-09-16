@@ -4,9 +4,11 @@ ledit ovat päällä 1 sekunnin jonka jälkeen väri vaihtuu */
 /*Keskiviikko 09/09/26: Huomasin virheen toteutuksessa erittelin Led_taskin eri taskeiksi nyt joka värillä on omansa
  ja lisätty keskeytys nappi*/
 
- /*Keskiviiko 09/09/26: Muokattu koodi alustavasti vastaamaan Viikon 2 1p vaatimuksia*/
+/*Keskiviiko 09/09/26: Muokattu koodi alustavasti vastaamaan Viikon 2 1p vaatimuksia*/
 
-//TODO: Lisää koodiin manuaalinen ohjaus toteuta tulevien viikkojen tavoitteet
+/*Keskiviikko 16/09/26: Lisätty Debug ominaisuus mittaa yksittäisten väri taskien toteutus ajan mikrosekuntteina ja laskee koko Sekvenssin toteutusj ajan.
+ Lisäksi asetettu Debug flag joka mahdollistaa Debug printtien päälle pois asettamisen*/
+
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
@@ -221,7 +223,7 @@ void green_task(void *, void *, void*) {
         gpio_pin_set_dt(&red, 0);
         gpio_pin_set_dt(&green, 1);
         gpio_pin_set_dt(&blue, 0);
-        
+
         if (debug_flag) {
             printk("[DEBUG] Green led: ON\n");
         }
