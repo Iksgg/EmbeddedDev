@@ -9,6 +9,8 @@ ledit ovat päällä 1 sekunnin jonka jälkeen väri vaihtuu */
 /*Keskiviikko 16/09/26: Lisätty Debug ominaisuus mittaa yksittäisten väri taskien toteutus ajan mikrosekuntteina ja laskee koko Sekvenssin toteutusj ajan.
  Lisäksi asetettu Debug flag joka mahdollistaa Debug printtien päälle pois asettamisen*/
 
+/*Torstai 24/09/26: Lisätty parser ja timer interupt toiminto alustavasti parserin toiminta on todennettu yksikkö testaamalla ja testit löytyvät omasta Unit_testing hakemistosta*/
+
 
 #include <stdlib.h>
 #include <zephyr/kernel.h>
