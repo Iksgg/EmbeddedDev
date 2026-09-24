@@ -4,21 +4,25 @@ ledit ovat päällä 1 sekunnin jonka jälkeen väri vaihtuu */
 /*Keskiviikko 09/09/26: Huomasin virheen toteutuksessa erittelin Led_taskin eri taskeiksi nyt joka värillä on omansa
  ja lisätty keskeytys nappi*/
 
- /*Keskiviiko 09/09/26: Muokattu koodi alustavasti vastaamaan Viikon 2 1p vaatimuksia*/
+/*Keskiviiko 09/09/26: Muokattu koodi alustavasti vastaamaan Viikon 2 1p vaatimuksia*/
 
-//TODO: Lisää koodiin manuaalinen ohjaus toteuta tulevien viikkojen tavoitteet
+/*Keskiviikko 16/09/26: Lisätty Debug ominaisuus mittaa yksittäisten väri taskien toteutus ajan mikrosekuntteina ja laskee koko Sekvenssin toteutusj ajan.
+ Lisäksi asetettu Debug flag joka mahdollistaa Debug printtien päälle pois asettamisen*/
+
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/timing/timing.h>
 
 // FIFO
 struct uart_msg{
     void *fifo_reserved;
     char color;
     uint32_t duration_ms;
+    bool is_last;
 };
 
 static struct k_fifo seq_fifo;
@@ -34,6 +38,10 @@ static struct k_condvar release_cv;
 static volatile char current_trgt = 0;
 static volatile uint32_t current_duration = 1000;
 static volatile bool task_release = true;
+
+// Debug variables
+static volatile bool debug_flag = true;
+static volatile uint32_t seq_timing_us = 0;
 
 // Led pin configurations
 static const struct gpio_dt_spec red   = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
@@ -65,6 +73,9 @@ K_THREAD_DEFINE(uart_thread,STACKSIZE,uart_task,NULL,NULL,NULL,PRIORITY,0,0);
 // Main program
 int main(void)
 {
+    timing_init();
+    timing_start();
+
 	init();
 	return 0;
 }
@@ -135,16 +146,31 @@ void red_task(void *, void *, void*) {
         }
         k_mutex_unlock(&color_mutex);
 
+        // Starting timing
+        timing_start();
+        timing_t start_time = timing_counter_get();
+
         // Change LED color
         gpio_pin_set_dt(&red, 1);
         gpio_pin_set_dt(&green, 0);
         gpio_pin_set_dt(&blue, 0);
-        printk("led red\n");
 
+        if (debug_flag) {
+            printk("[DEBUG] Red led: ON\n");
+        }
         k_msleep(current_duration);
+
+        // Stop timing
+        timing_t end_time = timing_counter_get();
+        timing_stop();
+
+        uint64_t timing_ns = timing_cycles_to_ns(timing_cycles_get(&start_time, &end_time));
+        uint32_t timing_us = (uint32_t)(timing_ns / 1000);
+        printk("RED LED task lasted for %u us\n", timing_us);
 
         // Send releas to dispatcher
         k_mutex_lock(&color_mutex, K_FOREVER);
+        seq_timing_us += timing_us;
         task_release = true;
         current_trgt = 0;
         k_condvar_signal(&release_cv);
@@ -161,16 +187,32 @@ void yellow_task(void *, void *, void*) {
         }
         k_mutex_unlock(&color_mutex);
 
+        // Starting timing
+        timing_start();
+        timing_t start_time = timing_counter_get();
+
         // Change LED color
         gpio_pin_set_dt(&red, 1);
         gpio_pin_set_dt(&green, 1);
         gpio_pin_set_dt(&blue, 0);
-        printk("led yellow\n");
 
+        if (debug_flag) {
+            printk("[DEBUG] Yellow led: ON\n");
+        }
         k_msleep(current_duration);
+
+        // Stop timing
+        timing_t end_time = timing_counter_get();
+        timing_stop();
+
+        uint64_t timing_ns = timing_cycles_to_ns(timing_cycles_get(&start_time, &end_time));
+        uint32_t timing_us = (uint32_t)(timing_ns / 1000);
+        printk("YELLOW LED task lasted for %u us\n", timing_us);
+
 
         // Send releas to dispatcher
         k_mutex_lock(&color_mutex, K_FOREVER);
+        seq_timing_us += timing_us;
         task_release = true;
         current_trgt = 0;
         k_condvar_signal(&release_cv);
@@ -187,16 +229,31 @@ void green_task(void *, void *, void*) {
         }
         k_mutex_unlock(&color_mutex);
 
+        // Starting timing
+        timing_start();
+        timing_t start_time = timing_counter_get();
+
         // Change LED color
         gpio_pin_set_dt(&red, 0);
         gpio_pin_set_dt(&green, 1);
         gpio_pin_set_dt(&blue, 0);
-        printk("led green\n");
 
+        if (debug_flag) {
+            printk("[DEBUG] Green led: ON\n");
+        }
         k_msleep(current_duration);
+
+        // Stop timing
+        timing_t end_time = timing_counter_get();
+        timing_stop();
+
+        uint64_t timing_ns = timing_cycles_to_ns(timing_cycles_get(&start_time, &end_time));
+        uint32_t timing_us = (uint32_t)(timing_ns / 1000);
+        printk("GREEN LED task lasted for %u us\n", timing_us);
 
         // Send releas to dispatcher
         k_mutex_lock(&color_mutex, K_FOREVER);
+        seq_timing_us += timing_us;
         task_release = true;
         current_trgt = 0;
         k_condvar_signal(&release_cv);
@@ -221,6 +278,7 @@ void dispatcher_task(void *, void *, void *) {
         k_mutex_lock(&color_mutex, K_FOREVER);
         current_trgt = msg -> color;
         current_duration = msg -> duration_ms;
+        bool is_last_char = msg -> is_last;
         task_release = false;
 
         // Releas memory
@@ -241,6 +299,11 @@ void dispatcher_task(void *, void *, void *) {
         while (!task_release) {
             k_condvar_wait(&release_cv, &color_mutex, K_FOREVER);
         }
+        // Check if FEFO is empty and prints total time
+        if (is_last_char) {
+            printk("Sequense total time %u us\n", seq_timing_us);
+            seq_timing_us = 0;
+        }
         k_mutex_unlock(&color_mutex);
 
     }
@@ -250,22 +313,32 @@ void uart_task(void *, void *, void *) {
     char rx_buff[32];
     int buff_idx = 0;
     char c;
-    char color = 0;
-    uint32_t duration = 0;
-    bool has_duration = false;
 
     while (true) {
         // Read sequense from serial
         if (uart_poll_in(uart_dev, &c) == 0) {
-            printk("RX: 0x%02X ('%c')\n", c, (c >= 32 && c <= 126) ? c : '.'); // Debugg print
+            if (debug_flag){
+                printk("RX: 0x%02X ('%c')\n", c, (c >= 32 && c <= 126) ? c : '.'); // Debugg print
+            }
             if (c == '\n' || c == '\r'){
                 if (buff_idx > 0){
                     rx_buff[buff_idx] = '\0';
-                    printk("Ajetaan sekvenssi: %s\n", rx_buff); // Debugg print
+
+                    if (debug_flag) {
+                        printk("Ajetaan sekvenssi: %s\n", rx_buff); // Debugg print
+                    }
+                    // Reset values
+                    char color = 0;
+                    uint32_t duration = 0;
+                    bool has_duration = false;
 
                     // Run trough the sequense
                     for (int i = 0; i < buff_idx; i++){
                         char seq_char = rx_buff[i];
+                        if (seq_char == 'D' || seq_char == 'd') {
+                            debug_flag = !debug_flag;
+                            printk("Debug-print: %s\n", debug_flag ? "ON" : "OFF");
+                        }
                         if (seq_char == 'R' || seq_char == 'r' || seq_char == 'Y' || seq_char == 'y' || seq_char == 'G' || seq_char == 'g') {
                             if (color != 0) {
                                 if (!has_duration) duration = 1000;
@@ -273,9 +346,9 @@ void uart_task(void *, void *, void *) {
                                 if (msg) {
                                     msg -> color = color;
                                     msg -> duration_ms = duration;
+                                    msg -> is_last = false;
                                     k_fifo_put(&seq_fifo, msg);
-                                }                            
-                            
+                                }                                                        
                             }
                             color = seq_char;
                             duration = 0;
@@ -285,7 +358,6 @@ void uart_task(void *, void *, void *) {
                             duration = (duration * 10) + (seq_char - '0');
                             has_duration = true;
                         }
-
                     }
                     if (color != 0) {
                         if (!has_duration) duration = 1000; // Fallback
@@ -294,6 +366,7 @@ void uart_task(void *, void *, void *) {
                         if (msg) {
                             msg->color = color;
                             msg->duration_ms = duration;
+                            msg -> is_last = true;
                             k_fifo_put(&seq_fifo, msg);
                         }
                     }
@@ -304,7 +377,6 @@ void uart_task(void *, void *, void *) {
                     rx_buff[buff_idx++] = c;
                 }
             }
-
         }
         k_msleep(10);
     }
