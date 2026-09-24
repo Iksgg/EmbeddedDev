@@ -1,0 +1,2 @@
+/usr/bin/ar qc libTimeParser.a CMakeFiles/TimeParser.dir/TimeParser.cpp.o
+/usr/bin/ranlib libTimeParser.a

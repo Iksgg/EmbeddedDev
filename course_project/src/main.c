@@ -10,6 +10,7 @@ ledit ovat päällä 1 sekunnin jonka jälkeen väri vaihtuu */
  Lisäksi asetettu Debug flag joka mahdollistaa Debug printtien päälle pois asettamisen*/
 
 
+#include <stdlib.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/device.h>
@@ -26,6 +27,11 @@ struct uart_msg{
 };
 
 static struct k_fifo seq_fifo;
+
+// ERROR Codes
+#define TIME_LEN_ERROR      -1
+#define TIME_ARRAY_ERROR    -2
+#define TIME_VALUE_ERROR    -3
 
 // Mutex and Condition variables
 static struct k_mutex color_mutex;
@@ -50,6 +56,7 @@ static const struct gpio_dt_spec blue  = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios)
 
 // UART configuration
 static const struct device *uart_dev = DEVICE_DT_GET(DT_NODELABEL(uart0));
+static const struct uart_msg timer_msg = { .color = 'R', .duration_ms = 1000, .is_last = true};
 
 // Thread parameters
 #define DISPATCHER_STACKSIZE 1024
@@ -63,6 +70,9 @@ void yellow_task(void *, void *, void *);
 void green_task(void *, void *, void *);
 void dispatcher_task(void *, void *, void *);
 void uart_task(void *, void *, void *);
+void timer1_handler(struct k_timer *timer);
+
+K_TIMER_DEFINE(action_timer, timer1_handler, NULL);
 
 K_THREAD_DEFINE(red_thread,STACKSIZE,red_task,NULL,NULL,NULL,PRIORITY,0,0);
 K_THREAD_DEFINE(yellow_thread,STACKSIZE,yellow_task,NULL,NULL,NULL,PRIORITY,0,0);
@@ -80,16 +90,56 @@ int main(void)
 	return 0;
 }
 
-// Button interupt handler
-void button_0_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins){
-	printk("Button pressed\n");
-	/*if (led_state != 4){
-		prev_state = led_state
-		led_state = 4
+// Parser function
+// time format: HHMMSS (6 characters)
+int time_parse(char *time) {
+
+	// how many seconds, default returns error
+	int seconds = TIME_LEN_ERROR;
+	// Lenght check
+	if (strlen(time) != 6) { return TIME_LEN_ERROR; }
+
+	// Type check
+	for (int i = 0; i < 6; i++) {
+		if(!isdigit((unsigned char)time[i])){
+			return TIME_ARRAY_ERROR;
+		}
+	}
+	// Check that string is not null
+	if (time == NULL) { return TIME_LEN_ERROR; }
+	// Parse values from time string
+	// For example: 124033 -> 12hour 40min 33sec
+    int values[3];
+	values[2] = atoi(time+4); // seconds
+	time[4] = 0;
+	values[1] = atoi(time+2); // minutes
+	time[2] = 0;
+	values[0] = atoi(time); // hours
+	// Add boundary check time values: below zero or above limit not allowed
+	// limits are 59 for minutes, 23 for hours, etc
+	if (values[0] < 0 || values[0] > 23 ||
+		values[1] < 0 || values[1] > 59 ||
+		values[2] < 0 || values[2] > 59) {
+			return TIME_LEN_ERROR;
+		}
+	// Calculate return value from the parsed minutes and seconds
+	// Otherwise error will be returned!
+	seconds = (values[0] * 3600) + (values[1] * 60) + values[2];
+    if (seconds == 0) { return TIME_ZERO_ERROR; }
+	return seconds;
+}
+
+// Timer interupt handler
+void timer1_handler(struct k_timer *timer){
+	printk("[Timer interupt]\n");
+
+    struct uart_msg *msg = k_malloc(sizeof(struct uart_msg));
+	if (msg) {
+		msg -> color = 'R';
+        msg -> duration_ms = 1000;
+        msg -> is_last = true;
+        k_fifo_put(&seq_fifo, msg);
 	} 
-	else {
-		led_state = prev_state;
-	}*/
 }
 
 // Initialize leds
@@ -310,54 +360,77 @@ void uart_task(void *, void *, void *) {
                 if (buff_idx > 0){
                     rx_buff[buff_idx] = '\0';
 
-                    if (debug_flag) {
-                        printk("Ajetaan sekvenssi: %s\n", rx_buff); // Debugg print
-                    }
-                    // Reset values
-                    char color = 0;
-                    uint32_t duration = 0;
-                    bool has_duration = false;
-
-                    // Run trough the sequense
-                    for (int i = 0; i < buff_idx; i++){
-                        char seq_char = rx_buff[i];
-                        if (seq_char == 'D' || seq_char == 'd') {
-                            debug_flag = !debug_flag;
-                            printk("Debug-print: %s\n", debug_flag ? "ON" : "OFF");
-                        }
-                        if (seq_char == 'R' || seq_char == 'r' || seq_char == 'Y' || seq_char == 'y' || seq_char == 'G' || seq_char == 'g') {
-                            if (color != 0) {
-                                if (!has_duration) duration = 1000;
-                                struct uart_msg *msg = k_malloc(sizeof(struct uart_msg));
-                                if (msg) {
-                                    msg -> color = color;
-                                    msg -> duration_ms = duration;
-                                    msg -> is_last = false;
-                                    k_fifo_put(&seq_fifo, msg);
-                                }                                                        
+                    bool is_time_string = false;
+                    if (buff_idx == 6) {
+                        bool all_digit = true;
+                        for (int i = 0; i < 6; i++){
+                            if (rx_buff[i] < '0' || rx_buff[i] > '9') {
+                                all_digit = false;
+                                break;
                             }
-                            color = seq_char;
-                            duration = 0;
-                            has_duration = false;
-
-                        } else if (seq_char >= '0' && seq_char <= '9') {
-                            duration = (duration * 10) + (seq_char - '0');
-                            has_duration = true;
                         }
+                        if (all_digit) { is_time_string = true; }
                     }
-                    if (color != 0) {
-                        if (!has_duration) duration = 1000; // Fallback
-                        
-                        struct uart_msg *msg = k_malloc(sizeof(struct uart_msg));
-                        if (msg) {
-                            msg->color = color;
-                            msg->duration_ms = duration;
-                            msg -> is_last = true;
-                            k_fifo_put(&seq_fifo, msg);
+
+                    if (is_time_string) {
+                        int parsed_seconds = time_parse(rx_buff);
+                        if (parsed_seconds >= 0) {
+                                if (debug_flag) { printk("UART: Timer set for %d seconds", parsed_seconds); }
+                                k_timer_start(&action_timer, K_SECONDS(parsed_seconds), K_NO_WAIT);
+                        } else {
+                            printk("UART: Incorrect time");
+                        }
+                    } else {
+                        if (debug_flag) {
+                            printk("Ajetaan sekvenssi: %s\n", rx_buff); // Debugg print
+                        }
+                        // Reset values
+                        char color = 0;
+                        uint32_t duration = 0;
+                        bool has_duration = false;
+
+                        // Run trough the sequense
+                        for (int i = 0; i < buff_idx; i++){
+                            char seq_char = rx_buff[i];
+                            if (seq_char == 'D' || seq_char == 'd') {
+                                debug_flag = !debug_flag;
+                                printk("Debug-print: %s\n", debug_flag ? "ON" : "OFF");
+                            }
+                            if (seq_char == 'R' || seq_char == 'r' || seq_char == 'Y' || seq_char == 'y' || seq_char == 'G' || seq_char == 'g') {
+                                if (color != 0) {
+                                    if (!has_duration) duration = 1000;
+                                    struct uart_msg *msg = k_malloc(sizeof(struct uart_msg));
+                                    if (msg) {
+                                        msg -> color = color;
+                                        msg -> duration_ms = duration;
+                                        msg -> is_last = false;
+                                        k_fifo_put(&seq_fifo, msg);
+                                    }                                                        
+                                }
+                                color = seq_char;
+                                duration = 0;
+                                has_duration = false;
+
+                            } else if (seq_char >= '0' && seq_char <= '9') {
+                                duration = (duration * 10) + (seq_char - '0');
+                                has_duration = true;
+                            }
+                        }
+
+                        if (color != 0) {
+                            if (!has_duration) duration = 1000; // Fallback
+                            
+                            struct uart_msg *msg = k_malloc(sizeof(struct uart_msg));
+                            if (msg) {
+                                msg->color = color;
+                                msg->duration_ms = duration;
+                                msg -> is_last = true;
+                                k_fifo_put(&seq_fifo, msg);
+                            }
                         }
                     }
                     buff_idx = 0;
-                }
+                }       
             } else {
                 if(buff_idx < sizeof(rx_buff) - 1){
                     rx_buff[buff_idx++] = c;
