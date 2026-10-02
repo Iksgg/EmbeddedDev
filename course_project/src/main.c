@@ -11,8 +11,10 @@ ledit ovat päällä 1 sekunnin jonka jälkeen väri vaihtuu */
 
 /*Torstai 24/09/26: Lisätty parser ja timer interupt toiminto alustavasti parserin toiminta on todennettu yksikkö testaamalla ja testit löytyvät omasta Unit_testing hakemistosta*/
 
+/*Perjantai 02/10/26: Korjattu tulkinta virheet Uart funkitossa jotka johtivat 12345 ja 12345A Testien ohittamiseen. Lisäksi implementoitu robot framework testit*/
 
 #include <stdlib.h>
+#include <ctype.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/device.h>
@@ -34,6 +36,7 @@ static struct k_fifo seq_fifo;
 #define TIME_LEN_ERROR      -1
 #define TIME_ARRAY_ERROR    -2
 #define TIME_VALUE_ERROR    -3
+#define TIME_ZERO_ERROR     -4
 
 // Mutex and Condition variables
 static struct k_mutex color_mutex;
@@ -375,26 +378,16 @@ void uart_task(void *, void *, void *) {
             if (c == '\n' || c == '\r'){
                 if (buff_idx > 0){
                     rx_buff[buff_idx] = '\0';
+                    int current_len = buff_idx;
+                    buff_idx = 0;
 
-                    bool is_time_string = false;
-                    if (buff_idx == 6) {
-                        bool all_digit = true;
-                        for (int i = 0; i < 6; i++){
-                            if (rx_buff[i] < '0' || rx_buff[i] > '9') {
-                                all_digit = false;
-                                break;
-                            }
-                        }
-                        if (all_digit) { is_time_string = true; }
-                    }
-
-                    if (is_time_string) {
+                    if (isdigit((unsigned char)rx_buff[0])) {
                         int parsed_seconds = time_parse(rx_buff);
                         if (parsed_seconds >= 0) {
                                 if (debug_flag) { printk("UART: Timer set for %d seconds", parsed_seconds); }
                                 k_timer_start(&action_timer, K_SECONDS(parsed_seconds), K_NO_WAIT);
                         } else {
-                            printk("UART: Incorrect time");
+                            printk("UART: Incorrect time\n");
                         }
                     } else {
                         if (debug_flag) {
@@ -455,4 +448,4 @@ void uart_task(void *, void *, void *) {
         }
         k_msleep(10);
     }
-}
+}  
